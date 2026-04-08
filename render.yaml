@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: agente-citas-espana
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server.py
+    envVars:
+      - key: BOOKITIT_PUBLIC_KEY
+        sync: false          # Lo cargás a mano en el dashboard de Render
+      - key: WIDGET_URL
+        sync: false
+      - key: CHECK_INTERVAL_MIN
+        value: "5"
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
