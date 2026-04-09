@@ -202,8 +202,8 @@ def main():
     print(f"[{_now()}] Consulado: España - Córdoba | Intervalo: ~{CHECK_INTERVAL_MIN} min")
     print("─" * 60)
 
-  _init_session()  
-  while True:
+    _init_session()  
+    while True:
         print(f"[{_now()}] Iniciando consulta a la API de citaconsular...")
         hay_cita, detalle = check_availability()
 
