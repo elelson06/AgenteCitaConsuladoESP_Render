@@ -1,9 +1,8 @@
 """
 Agente de citas — Consulado General de España en Córdoba
-Versión PythonAnywhere (sin browser, usa la API REST de bookitit)
 
 Cómo funciona:
-  1. Consulta la API de bookitit para obtener los servicios disponibles
+  1. Consulta la API de citaconsular.es (proxy de bookitit) para obtener servicios
   2. Para cada servicio, consulta si hay slots libres en los próximos días
   3. Si encuentra disponibilidad → notifica por Telegram
   4. Si no hay nada → espera el intervalo y reintenta
@@ -11,47 +10,90 @@ Cómo funciona:
 
 import time
 import random
+import re
+import json
 import requests
 from datetime import datetime, timedelta
 from config import BOOKITIT_PUBLIC_KEY, WIDGET_URL, CHECK_INTERVAL_MIN
 from notifier import send_telegram
 
-API_BASE = "https://app.bookitit.com/api/11"
+# ── URL base real (descubierta via DevTools) ──────────────────────────────────
+# El widget NO llama a app.bookitit.com sino al proxy de citaconsular.es
+API_BASE = "https://www.citaconsular.es/onlinebookings"
 
-# Cuántos días hacia adelante buscar slots disponibles
-DAYS_AHEAD = 60
+# Parámetros fijos que el widget siempre manda
+WIDGET_SRC = f"https://www.citaconsular.es/es/hosteds/widgetdefault/{BOOKITIT_PUBLIC_KEY}/"
+COMMON_PARAMS = {
+    "type":      "default",
+    "publickey": BOOKITIT_PUBLIC_KEY,
+    "lang":      "es",
+    "version":   "4",
+    "src":       WIDGET_SRC,
+    "srvsrc":    "https://www.citaconsular.es",
+}
 
-# Headers para que la API no nos rechace
+# Headers que imitan exactamente al browser (copiados de DevTools)
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
+        "Chrome/146.0.0.0 Safari/537.36"
     ),
-    "Accept": "application/json, text/javascript, */*; q=0.01",
-    "Accept-Language": "es-AR,es;q=0.9",
-    "Referer": "https://www.citaconsular.es/",
-    "Origin": "https://www.citaconsular.es",
+    "Accept":           "text/javascript, application/javascript, application/ecmascript, application/x-ecmascript, */*; q=0.01",
+    "Accept-Language":  "es-US,es-419;q=0.9,es;q=0.8",
+    "Referer":          WIDGET_SRC,
     "X-Requested-With": "XMLHttpRequest",
+    "Sec-Fetch-Dest":   "empty",
+    "Sec-Fetch-Mode":   "cors",
+    "Sec-Fetch-Site":   "same-origin",
 }
+
+# Cuántos días hacia adelante buscar slots disponibles
+DAYS_AHEAD = 60
 
 
 def _now():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _callback_name():
+    """Genera un nombre de callback JSONP aleatorio igual que jQuery."""
+    ts = int(time.time() * 1000)
+    rnd = random.randint(10000000, 99999999)
+    return f"jQuery{ts}{rnd}"
+
+
+def _parse_jsonp(text):
+    """
+    Extrae el JSON del wrapper JSONP.
+    Ejemplo: jQuery123({...}) → devuelve el dict {...}
+    """
+    match = re.search(r'\((\{.*\})\)\s*;?\s*$', text, re.DOTALL)
+    if not match:
+        raise ValueError(f"Respuesta JSONP inesperada: {text[:200]}")
+    return json.loads(match.group(1))
+
+
+def _get(endpoint, extra_params=None):
+    """Helper genérico para llamadas JSONP a la API."""
+    params = dict(COMMON_PARAMS)
+    params["callback"] = _callback_name()
+    params["_"] = int(time.time() * 1000)
+    if extra_params:
+        params.update(extra_params)
+
+    url = f"{API_BASE}/{endpoint}/"
+    r = requests.get(url, headers=HEADERS, params=params, timeout=15)
+    r.raise_for_status()
+    return _parse_jsonp(r.text)
+
+
 def get_services():
     """Obtiene la lista de servicios del consulado."""
-    url = f"{API_BASE}/getservices/{BOOKITIT_PUBLIC_KEY}"
     try:
-        r = requests.get(url, headers=HEADERS, timeout=15)
-        print(f"[DEBUG] Status: {r.status_code}")
-        print(f"[DEBUG] Response: {r.text[:300]}")
-        r.raise_for_status()
-        data = r.json()
+        data = _get("getservices")
         services = data.get("getservices", {}).get("services", [])
         if isinstance(services, dict):
-            # Cuando hay un solo servicio la API devuelve dict en vez de lista
             services = [services]
         return services
     except Exception as e:
@@ -60,12 +102,9 @@ def get_services():
 
 
 def get_agendas(service_id):
-    """Obtiene las agendas (funcionarios/ventanillas) para un servicio."""
-    url = f"{API_BASE}/getagendas/{BOOKITIT_PUBLIC_KEY}/{service_id}"
+    """Obtiene las agendas (ventanillas) para un servicio."""
     try:
-        r = requests.get(url, headers=HEADERS, timeout=15)
-        r.raise_for_status()
-        data = r.json()
+        data = _get("getagendas", {"service": service_id})
         agendas = data.get("getagendas", {}).get("agendas", [])
         if isinstance(agendas, dict):
             agendas = [agendas]
@@ -79,16 +118,13 @@ def get_free_slots(service_id, agenda_id, date_str):
     """
     Consulta slots libres para un servicio/agenda en una fecha concreta.
     date_str formato: YYYY-MM-DD
-    Retorna lista de slots o [] si no hay.
     """
-    url = (
-        f"{API_BASE}/getfreeslots/{BOOKITIT_PUBLIC_KEY}"
-        f"/{service_id}/{agenda_id}/{date_str}/false"
-    )
     try:
-        r = requests.get(url, headers=HEADERS, timeout=15)
-        r.raise_for_status()
-        data = r.json()
+        data = _get("getfreeslots", {
+            "service": service_id,
+            "agenda":  agenda_id,
+            "date":    date_str,
+        })
         slots = data.get("getfreeslots", {}).get("freeslots", [])
         if isinstance(slots, dict):
             slots = [slots]
@@ -142,7 +178,6 @@ def check_availability():
                     print(f"[{_now()}] ✅ DISPONIBILIDAD ENCONTRADA — {detalle}")
                     return True, detalle
 
-                # Pausa mínima entre requests para no saturar la API
                 time.sleep(0.3)
 
     return False, ""
@@ -154,7 +189,7 @@ def main():
     print("─" * 60)
 
     while True:
-        print(f"[{_now()}] Iniciando consulta a la API de bookitit...")
+        print(f"[{_now()}] Iniciando consulta a la API de citaconsular...")
         hay_cita, detalle = check_availability()
 
         if hay_cita:
@@ -168,7 +203,6 @@ def main():
         else:
             print(f"[{_now()}] ❌ Sin disponibilidad. Siguiente ciclo en ~{CHECK_INTERVAL_MIN} min.")
 
-        # Espera con variación aleatoria ±30s
         wait_sec = CHECK_INTERVAL_MIN * 60 + random.uniform(-30, 30)
         print(f"[{_now()}] Próxima consulta en {wait_sec / 60:.1f} min")
         print("─" * 60)
