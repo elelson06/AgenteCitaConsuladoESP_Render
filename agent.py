@@ -85,6 +85,9 @@ def _get(endpoint, extra_params=None):
     url = f"{API_BASE}/{endpoint}/"
     r = requests.get(url, headers=HEADERS, params=params, timeout=15)
     r.raise_for_status()
+    print(f"[DEBUG] URL: {r.url}")
+    print(f"[DEBUG] Status: {r.status_code}")
+    print(f"[DEBUG] Response: {r.text[:500]}")
     return _parse_jsonp(r.text)
 
 
