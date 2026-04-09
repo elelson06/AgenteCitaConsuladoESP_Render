@@ -28,7 +28,11 @@ HEADERS = {
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/124.0.0.0 Safari/537.36"
     ),
-    "Accept": "application/json",
+    "Accept": "application/json, text/javascript, */*; q=0.01",
+    "Accept-Language": "es-AR,es;q=0.9",
+    "Referer": "https://www.citaconsular.es/",
+    "Origin": "https://www.citaconsular.es",
+    "X-Requested-With": "XMLHttpRequest",
 }
 
 
