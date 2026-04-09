@@ -51,6 +51,17 @@ HEADERS = {
 # Cuántos días hacia adelante buscar slots disponibles
 DAYS_AHEAD = 60
 
+# Sesión persistente que mantiene cookies automáticamente
+SESSION = requests.Session()
+SESSION.headers.update(HEADERS)
+
+def _init_session():
+    """Visita el widget para obtener cookies de sesión válidas."""
+    try:
+        SESSION.get(WIDGET_SRC, timeout=30)
+        print(f"[{_now()}] 🍪 Sesión inicializada correctamente")
+    except Exception as e:
+        print(f"[{_now()}] ⚠️  Error inicializando sesión: {e}")
 
 def _now():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -83,7 +94,7 @@ def _get(endpoint, extra_params=None):
         params.update(extra_params)
 
     url = f"{API_BASE}/{endpoint}/"
-    r = requests.get(url, headers=HEADERS, params=params, timeout=30)
+    r = SESSION.get(url, params=params, timeout=30)
     r.raise_for_status()
     print(f"[DEBUG] URL: {r.url}")
     print(f"[DEBUG] Status: {r.status_code}")
@@ -191,7 +202,8 @@ def main():
     print(f"[{_now()}] Consulado: España - Córdoba | Intervalo: ~{CHECK_INTERVAL_MIN} min")
     print("─" * 60)
 
-    while True:
+  _init_session()  
+  while True:
         print(f"[{_now()}] Iniciando consulta a la API de citaconsular...")
         hay_cita, detalle = check_availability()
 
