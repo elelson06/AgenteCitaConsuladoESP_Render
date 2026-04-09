@@ -41,6 +41,8 @@ def get_services():
     url = f"{API_BASE}/getservices/{BOOKITIT_PUBLIC_KEY}"
     try:
         r = requests.get(url, headers=HEADERS, timeout=15)
+        print(f"[DEBUG] Status: {r.status_code}")
+        print(f"[DEBUG] Response: {r.text[:300]}")
         r.raise_for_status()
         data = r.json()
         services = data.get("getservices", {}).get("services", [])
